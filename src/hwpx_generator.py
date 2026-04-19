@@ -16,6 +16,9 @@ _ET.SubElement = _smart_subelement  # type: ignore[assignment]
 
 from hwpx import HwpxDocument
 
+_HH = "{http://www.hancom.co.kr/hwpml/2011/head}"
+_HC = "{http://www.hancom.co.kr/hwpml/2011/core}"
+
 STYLE_MAP = {
     "바탕글": 0,
     "본문": 1,
@@ -28,7 +31,7 @@ STYLE_MAP = {
 }
 
 PAGE_WIDTH = 42520   # HWPUNIT (A4 본문 너비)
-CELL_HEIGHT = 1800   # 기본 셀 높이
+CELL_HEIGHT = 2400   # 기본 셀 높이
 
 
 def _col_widths(col_cnt: int, col_widths: list[int] | None) -> list[int]:
@@ -50,6 +53,60 @@ def _col_widths(col_cnt: int, col_widths: list[int] | None) -> list[int]:
     return ws
 
 
+def _patch_header(doc: HwpxDocument) -> tuple[str, str]:
+    """
+    헤더에 2개 항목 추가:
+    - 가운데 정렬 paraPr (개요1용 CENTER align)
+    - 회색 배경 borderFill (테이블 헤더 셀용)
+    반환: (center_para_pr_id, gray_border_fill_id)
+    """
+    header = doc._root._headers[0]
+    el = header._element
+
+    # ── 1. 개요 1 paraPr (id=2) align → CENTER ───────────────────────
+    for pp in el.findall(f".//{_HH}paraPr"):
+        if pp.get("id") == "2":
+            align = pp.find(f"{_HH}align")
+            if align is not None:
+                align.set("horizontal", "CENTER")
+            break
+
+    # ── 2. 회색 배경 borderFill 추가 ────────────────────────────────
+    bf_list = el.find(f".//{_HH}borderFills")
+    existing_ids = [int(bf.get("id", 0)) for bf in bf_list.findall(f"{_HH}borderFill")]
+    new_id = str(max(existing_ids) + 1)
+
+    # 기존 기본 borderFill(id=2) 복사 후 fill 변경
+    base_bf = bf_list.find(f"{_HH}borderFill[@id='2']")
+    if base_bf is None:
+        base_bf = bf_list.find(f"{_HH}borderFill")
+    import copy
+    gray_bf = copy.deepcopy(base_bf)
+    gray_bf.set("id", new_id)
+
+    # 기존 fillBrush 제거 후 회색으로 교체
+    for fb in gray_bf.findall(f"{_HC}fillBrush"):
+        gray_bf.remove(fb)
+    fill = _LET.SubElement(gray_bf, f"{_HC}fillBrush")
+    _LET.SubElement(fill, f"{_HC}winBrush", {
+        "faceColor": "#D9D9D9",
+        "hatchColor": "#999999",
+        "alpha": "0",
+    })
+    bf_list.append(gray_bf)
+
+    # itemCnt 갱신
+    bf_list.set("itemCnt", str(len(bf_list.findall(f"{_HH}borderFill"))))
+    header.mark_dirty()
+
+    return "2", new_id
+
+
+def _set_cell_border_fill(cell, border_fill_id: str) -> None:
+    """셀 element의 borderFillIDRef 직접 변경."""
+    cell.element.set("borderFillIDRef", border_fill_id)
+
+
 def build_hwpx(paragraphs: list[dict], output_path: str):
     """
     paragraphs: list of dicts
@@ -62,13 +119,19 @@ def build_hwpx(paragraphs: list[dict], output_path: str):
     section = doc.sections[0]
     section.properties.set_page_margins(left=3500, right=3000, top=3500, bottom=3000, header=1500, footer=1500)
 
+    # 헤더 패치: 개요1 가운데정렬, 회색 borderFill 추가
+    _, gray_bf_id = _patch_header(doc)
+
     for item in paragraphs:
         if item["type"] == "text":
             text = item.get("text", "")
             style_name = item.get("style", "바탕글")
             bold = item.get("bold", False)
 
-            if bold or style_name == "개요 1":
+            if style_name == "개요 1":
+                p = doc.add_paragraph("", style_id_ref=2, para_pr_id_ref=2)
+                p.add_run(text, bold=True)
+            elif bold:
                 p = doc.add_paragraph("")
                 p.style_id_ref = STYLE_MAP.get(style_name, 0)
                 p.add_run(text, bold=True)
@@ -83,7 +146,7 @@ def build_hwpx(paragraphs: list[dict], output_path: str):
 
             row_cnt = len(rows)
             col_cnt = max(len(r) for r in rows)
-            header_rows = item.get("header_rows", 1)  # 굵게 처리할 헤더 행 수
+            header_rows = item.get("header_rows", 1)
             widths = _col_widths(col_cnt, item.get("col_widths"))
 
             tbl = doc.add_table(rows=row_cnt, cols=col_cnt, width=PAGE_WIDTH)
@@ -96,7 +159,9 @@ def build_hwpx(paragraphs: list[dict], output_path: str):
                         continue
                     cell.set_size(widths[ci] if ci < len(widths) else widths[-1], CELL_HEIGHT)
 
-                    # 셀 내용: 헤더 행은 굵게
+                    if is_header:
+                        _set_cell_border_fill(cell, gray_bf_id)
+
                     paras = list(cell.paragraphs)
                     if paras:
                         p = paras[0]
