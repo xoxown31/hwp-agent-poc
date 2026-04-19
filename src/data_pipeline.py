@@ -66,7 +66,7 @@ def hwpx_to_json(path: str, max_paragraphs: int = 60) -> list[dict]:
     return items
 
 
-def generate_prompt(doc_json: list[dict], model: str = "gemma4:e2b") -> str:
+def generate_prompt(doc_json: list[dict], model: str = "exaone3.5:7.8b") -> str:
     """LLM으로 문서 JSON → 사용자 요청 프롬프트 생성."""
     doc_preview = json.dumps(doc_json[:20], ensure_ascii=False)
     response = ollama.chat(
@@ -79,7 +79,7 @@ def generate_prompt(doc_json: list[dict], model: str = "gemma4:e2b") -> str:
     return response["message"]["content"].strip()
 
 
-def process_file(hwpx_path: str, model: str = "gemma4:e2b") -> dict | None:
+def process_file(hwpx_path: str, model: str = "exaone3.5:7.8b") -> dict | None:
     """단일 hwpx → SFT 데이터 1건."""
     try:
         doc_json = hwpx_to_json(hwpx_path)
@@ -92,7 +92,7 @@ def process_file(hwpx_path: str, model: str = "gemma4:e2b") -> dict | None:
         return None
 
 
-def run_pipeline(samples_dir: str, output_path: str, model: str = "gemma4:e2b"):
+def run_pipeline(samples_dir: str, output_path: str, model: str = "exaone3.5:7.8b"):
     files = [f for f in os.listdir(samples_dir) if f.endswith(".hwpx")]
     print(f"Processing {len(files)} files...")
 

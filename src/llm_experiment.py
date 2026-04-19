@@ -30,7 +30,7 @@ Example output:
 ]"""
 
 
-def generate_document(prompt: str, model: str = "gemma4:e2b") -> list[dict]:
+def generate_document(prompt: str, model: str = "exaone3.5:7.8b") -> list[dict]:
     response = ollama.chat(
         model=model,
         messages=[
